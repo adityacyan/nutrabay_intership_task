@@ -36,6 +36,91 @@ else:
 # Public helpers
 # ---------------------------------------------------------------------------
 
+async def generate_summary_streaming(content: str, callback=None):
+    """Generate summary with character-by-character streaming like ChatGPT."""
+    # Use much more content with 2M token limit
+    truncated = content[:750000]
+    
+    # Detect document context/industry
+    content_lower = truncated.lower()
+    industry_context = _detect_industry_context(content_lower)
+    
+    print(f"[AI]   → summary (streaming) ({len(truncated)} chars, ~{len(truncated.split())} words, industry={industry_context})")
+    
+    # Tailor prompt based on industry
+    industry_specific_guidance = _get_industry_specific_guidance(industry_context)
+    
+    prompt = f"""You are analyzing a Standard Operating Procedure (SOP) document from a {industry_context} environment.
+
+{industry_specific_guidance}
+
+Analyze this comprehensive SOP document and return a COMPLETE JSON object with ALL fields fully populated. Do not truncate or cut off any content.
+
+CRITICAL INSTRUCTIONS:
+1. Generate COMPLETE responses for ALL fields
+2. Do NOT truncate arrays or text mid-sentence
+3. Ensure ALL key_points are complete sentences
+4. Ensure ALL safety items are complete descriptions
+5. Provide FULL equipment lists
+6. Complete ALL regulatory compliance references
+
+Return a JSON object with these exact keys:
+- "overview": a detailed paragraph of 4-5 COMPLETE sentences providing comprehensive summary of the document's purpose, scope, and key procedures. Focus on {_get_industry_focus(industry_context)}. MUST be 150-250 words.
+- "key_points": a JSON array of exactly 8-12 strings, each being a COMPLETE detailed point (20-40 words each) covering procedures, safety, compliance, and quality aspects relevant to {industry_context}
+- "complexity": one of the strings "Low" / "Medium" / "High" / "Very High"
+- "document_type": classify as one of "laboratory_procedure" / "manufacturing_process" / "safety_procedure" / "maintenance_procedure" / "administrative_procedure" / "software_development_procedure" / "quality_control_procedure"
+- "critical_safety_items": array of 3-5 COMPLETE critical safety requirements (each 15-30 words) - emphasize {_get_safety_focus(industry_context)}
+- "regulatory_compliance": array of 2-5 COMPLETE regulatory standards or compliance requirements mentioned (e.g., {_get_compliance_examples(industry_context)})
+- "equipment_requirements": array of 3-8 COMPLETE equipment, tools, or systems descriptions
+
+FORMATTING REQUIREMENTS:
+- Use proper punctuation and complete sentences
+- Each array item must be a complete, standalone statement
+- No truncated text or incomplete thoughts
+- Professional, clear language appropriate for {industry_context}
+
+Return ONLY the raw JSON object. No markdown formatting, no code blocks, no extra commentary.
+
+COMPREHENSIVE SOP DOCUMENT:
+{truncated}"""
+    
+    try:
+        if _gemini_available and _model:
+            # Use streaming API
+            response = _model.generate_content(prompt, stream=True)
+            
+            accumulated_text = ""
+            for chunk in response:
+                if chunk.text:
+                    accumulated_text += chunk.text
+                    # Stream each character to callback (synchronous callback)
+                    if callback:
+                        callback(chunk.text)
+            
+            # Parse the complete accumulated response
+            raw = re.sub(r"^```(?:json)?\n?", "", accumulated_text.strip()).rstrip("```").strip()
+            data = json.loads(raw)
+            
+            # Strip emojis from string fields
+            for field in ["overview", "complexity", "document_type"]:
+                if isinstance(data.get(field), str):
+                    data[field] = _strip_emojis(data[field])
+            for list_field in ["key_points", "critical_safety_items", "regulatory_compliance", "equipment_requirements"]:
+                if isinstance(data.get(list_field), list):
+                    data[list_field] = [_strip_emojis(p) for p in data[list_field] if isinstance(p, str)]
+            
+            data.setdefault("word_count", len(content.split()))
+            print(f"[AI]   ✓ summary (streamed) | complexity={data.get('complexity')} points={len(data.get('key_points', []))} type={data.get('document_type')}")
+            return data
+        else:
+            # Fallback to non-streaming
+            return await _gemini_summary(content)
+            
+    except Exception as e:
+        print(f"[AI]   ✗ summary streaming failed: {e} → fallback")
+        return await _gemini_summary(content)
+
+
 async def generate_summary(content: str) -> dict:
     """Return {overview, key_points, word_count, complexity}."""
     if _gemini_available and _model:
@@ -65,19 +150,33 @@ async def generate_questions(content: str, count: int = 4) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 async def _gemini_summary(content: str) -> dict:
-    # Use much more content with 300k token limit - approximately 225k words
-    truncated = content[:150000]  # Increased from 4000 to 150k characters
-    print(f"[AI]   → summary  ({len(truncated)} chars, ~{len(truncated.split())} words)")
-    prompt = f"""Analyze this comprehensive SOP document and return a JSON object with these exact keys:
-- "overview": a detailed paragraph of 4-5 sentences providing comprehensive summary of the document's purpose, scope, and key procedures
-- "key_points": a JSON array of 8-12 strings, each being a detailed and specific point covering procedures, safety, compliance, and quality aspects
-- "complexity": one of the strings "Low" / "Medium" / "High" / "Very High"
-- "document_type": classify as one of "laboratory_procedure" / "manufacturing_process" / "safety_procedure" / "maintenance_procedure" / "administrative_procedure"
-- "critical_safety_items": array of the most critical safety requirements (up to 5 items)
-- "regulatory_compliance": array of regulatory standards or compliance requirements mentioned
-- "equipment_requirements": array of key equipment or tools mentioned
+    # Use much more content with 2M token limit - approximately 1.5M words
+    # Gemini 2.0 Flash has 1M token context, so we use ~750k characters (~560k words)
+    truncated = content[:750000]  # Increased from 150k to 750k characters
+    
+    # Detect document context/industry
+    content_lower = truncated.lower()
+    industry_context = _detect_industry_context(content_lower)
+    
+    print(f"[AI]   → summary  ({len(truncated)} chars, ~{len(truncated.split())} words, industry={industry_context})")
+    
+    # Tailor prompt based on industry
+    industry_specific_guidance = _get_industry_specific_guidance(industry_context)
+    
+    prompt = f"""You are analyzing a Standard Operating Procedure (SOP) document from a {industry_context} environment.
 
-Use clear, professional language. Include specific details from the document. Return ONLY the raw JSON object. No extra commentary.
+{industry_specific_guidance}
+
+Analyze this comprehensive SOP document and return a JSON object with these exact keys:
+- "overview": a detailed paragraph of 4-5 sentences providing comprehensive summary of the document's purpose, scope, and key procedures. Focus on {_get_industry_focus(industry_context)}.
+- "key_points": a JSON array of 8-12 strings, each being a detailed and specific point covering procedures, safety, compliance, and quality aspects relevant to {industry_context}
+- "complexity": one of the strings "Low" / "Medium" / "High" / "Very High"
+- "document_type": classify as one of "laboratory_procedure" / "manufacturing_process" / "safety_procedure" / "maintenance_procedure" / "administrative_procedure" / "software_development_procedure" / "quality_control_procedure"
+- "critical_safety_items": array of the most critical safety requirements (up to 5 items) - emphasize {_get_safety_focus(industry_context)}
+- "regulatory_compliance": array of regulatory standards or compliance requirements mentioned (e.g., {_get_compliance_examples(industry_context)})
+- "equipment_requirements": array of key equipment, tools, or systems mentioned
+
+Use clear, professional language appropriate for {industry_context}. Include specific details from the document. Return ONLY the raw JSON object. No extra commentary.
 
 COMPREHENSIVE SOP DOCUMENT:
 {truncated}"""
@@ -101,12 +200,16 @@ COMPREHENSIVE SOP DOCUMENT:
 
 
 async def _gemini_training_steps(procedures: list[dict], content_hint: str) -> list[dict]:
+    # Detect industry context from content
+    content_lower = content_hint.lower()
+    industry_context = _detect_industry_context(content_lower)
+    
     # Use comprehensive procedure context - much more detailed
     proc_text = ""
-    for i, p in enumerate(procedures[:30]):  # Increased from 20 to 30 steps
-        context_str = " | ".join(p.get('surrounding_context', [])[:2])
-        deps_str = ", ".join(p.get('dependencies', [])[:2])
-        tools_str = ", ".join(p.get('tools_equipment', [])[:3])
+    for i, p in enumerate(procedures[:50]):  # Increased from 30 to 50 steps
+        context_str = " | ".join(p.get('surrounding_context', [])[:3])
+        deps_str = ", ".join(p.get('dependencies', [])[:3])
+        tools_str = ", ".join(p.get('tools_equipment', [])[:5])
         
         proc_text += f"""
 Procedure {i+1}: {p.get('content') or p.get('original_text', '')}
@@ -116,42 +219,54 @@ Procedure {i+1}: {p.get('content') or p.get('original_text', '')}
 - Context: {context_str}
 - Dependencies: {deps_str}
 - Equipment: {tools_str}
-- Actions: {', '.join(p.get('action_verbs', [])[:2])}
+- Actions: {', '.join(p.get('action_verbs', [])[:3])}
 """
     
-    # Include comprehensive training context
+    # Include comprehensive training context - use up to 500k characters
     full_context = f"""
 COMPREHENSIVE TRAINING CONTEXT:
-{content_hint[:50000]}  # Use up to 50k characters of context
+{content_hint[:500000]}  # Increased from 50k to 500k characters
 
 DETAILED PROCEDURES:
 {proc_text}
 """
     
-    print(f"[AI]   → training  ({len(procedures)} procedures, {len(full_context)} chars context)")
+    print(f"[AI]   → training  ({len(procedures)} procedures, {len(full_context)} chars context, industry={industry_context})")
 
-    prompt = f"""Create a comprehensive structured training guide as a JSON array of step objects for this SOP based on the detailed analysis provided.
+    # Industry-specific training guidance
+    training_guidance = _get_training_guidance(industry_context)
+    role_specific_examples = _get_role_examples(industry_context)
+
+    prompt = f"""You are creating a comprehensive training guide for a {industry_context} environment.
+
+{training_guidance}
+
+Create a structured training guide as a JSON array of step objects for this SOP based on the detailed analysis provided.
+
+INDUSTRY-SPECIFIC CONSIDERATIONS FOR {industry_context.upper()}:
+{role_specific_examples}
 
 Each step object must have:
 - "step_number": integer
-- "title": descriptive title (50-80 characters)
-- "description": detailed 2-3 sentences explaining what the trainee does and why
-- "duration": integer number of minutes (realistic estimate)
-- "type": one of "introduction" / "safety_briefing" / "procedure" / "quality_check" / "assessment"
-- "key_points": array of 3-5 specific, actionable strings
-- "safety_notes": array of specific safety considerations (empty array if none)
+- "title": descriptive title (50-80 characters) - use terminology appropriate for {industry_context}
+- "description": detailed 2-3 sentences explaining what the trainee does and why, using language familiar to {industry_context} professionals
+- "duration": integer number of minutes (realistic estimate for {industry_context} environment)
+- "type": one of "introduction" / "safety_briefing" / "procedure" / "quality_check" / "assessment" / "hands_on_practice"
+- "key_points": array of 3-5 specific, actionable strings relevant to {industry_context}
+- "safety_notes": array of specific safety considerations (empty array if none) - emphasize {_get_safety_focus(industry_context)}
 - "complexity_level": one of "beginner" / "intermediate" / "advanced"
-- "required_equipment": array of specific equipment/tools needed
+- "required_equipment": array of specific equipment/tools/systems needed
 - "prerequisites": array of specific prerequisites for this step
 
-Create 6-12 comprehensive training steps including:
-1. Introduction step explaining purpose and scope
-2. Safety briefing covering critical safety requirements
+Create 8-15 comprehensive training steps including:
+1. Introduction step explaining purpose, scope, and relevance to {industry_context}
+2. Safety briefing covering critical safety requirements for {industry_context}
 3. Multiple detailed procedure steps based on the analysis
-4. Quality check steps for verification
-5. Final assessment step
+4. Hands-on practice steps where applicable
+5. Quality check/verification steps
+6. Final assessment step
 
-Use the comprehensive context provided to create detailed, specific training content. Return ONLY the raw JSON array.
+Use industry-appropriate terminology and examples. Make training practical and role-specific. Return ONLY the raw JSON array.
 
 {full_context}"""
     
@@ -175,38 +290,55 @@ Use the comprehensive context provided to create detailed, specific training con
 
 
 async def _gemini_questions(content: str, count: int) -> list[dict]:
+    # Detect industry context
+    content_lower = content.lower()
+    industry_context = _detect_industry_context(content_lower)
+    
     # Use much more content for comprehensive question generation
-    truncated = content[:100000]  # Increased from 3500 to 100k characters
-    print(f"[AI]   → questions ({count} requested, {len(truncated)} chars, ~{len(truncated.split())} words)")
-    prompt = f"""Generate {count} comprehensive evaluation questions as a JSON array for this SOP document. Create diverse, challenging questions that test deep understanding.
+    truncated = content[:500000]  # Increased from 100k to 500k characters
+    print(f"[AI]   → questions ({count} requested, {len(truncated)} chars, ~{len(truncated.split())} words, industry={industry_context})")
+    
+    # Industry-specific evaluation guidance
+    evaluation_guidance = _get_evaluation_guidance(industry_context)
+    scenario_examples = _get_scenario_examples(industry_context)
+    
+    prompt = f"""You are creating an evaluation assessment for a {industry_context} environment.
+
+{evaluation_guidance}
+
+Generate {count} comprehensive evaluation questions as a JSON array for this SOP document. Create diverse, challenging questions that test deep understanding in a {industry_context} context.
+
+INDUSTRY-SPECIFIC EVALUATION FOCUS FOR {industry_context.upper()}:
+{scenario_examples}
 
 Question types to include:
-- Multiple-choice (4 options): Test specific knowledge and procedures
-- True-false: Test understanding of safety rules and compliance
-- Scenario-based (4 options): Test application of procedures in realistic situations
-- Short-answer: Test ability to explain processes and safety requirements
+- Multiple-choice (4 options): Test specific knowledge and procedures relevant to {industry_context}
+- True-false: Test understanding of safety rules, compliance, and best practices
+- Scenario-based (4 options): Test application of procedures in realistic {industry_context} situations
+- Short-answer: Test ability to explain processes and requirements
 
 Each question object must have:
 - "id": integer (1-based)
 - "type": one of "multiple-choice" / "true-false" / "scenario" / "short-answer"
-- "question": detailed, specific question string (be very specific, reference actual content)
+- "question": detailed, specific question string using {industry_context} terminology and scenarios
 - "options": array of 4 detailed answer strings for multiple-choice/scenario, null for others
 - "correct_answer": 0-based integer index for multiple-choice/scenario, boolean for true-false, null for short-answer
-- "explanation": comprehensive explanation string (2-3 sentences)
+- "explanation": comprehensive explanation string (2-3 sentences) with {industry_context} context
 - "difficulty_level": one of "beginner" / "intermediate" / "advanced"
-- "topic_area": one of "safety" / "procedure" / "compliance" / "equipment" / "quality"
+- "topic_area": one of "safety" / "procedure" / "compliance" / "equipment" / "quality" / "troubleshooting" / "best_practices"
 - "safety_critical": boolean (true if safety-related)
 - "points": integer 1-3 based on difficulty
 
-Focus on:
-- Critical safety procedures and requirements
+Focus on {industry_context}-specific areas:
+- Critical safety procedures and requirements for {industry_context}
 - Key procedural steps and their sequence
-- Equipment usage and safety considerations
+- Equipment/system usage and safety considerations
 - Compliance and regulatory requirements
 - Quality control and verification steps
-- Emergency procedures and responses
+- Common issues and troubleshooting
+- Best practices and industry standards
 
-Make questions specific to the actual document content. Return ONLY the raw JSON array.
+Make questions specific to the actual document content and realistic for {industry_context} professionals. Return ONLY the raw JSON array.
 
 COMPREHENSIVE DOCUMENT:
 {truncated}"""
@@ -238,6 +370,541 @@ def _strip_emojis(text: str) -> str:
     # Remove emojis (broad unicode ranges)
     text = re.sub(r"[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\U0001FA70-\U0001FAFF]", "", text)
     return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# Industry Context Detection and Guidance
+# ---------------------------------------------------------------------------
+
+def _detect_industry_context(content_lower: str) -> str:
+    """Detect the industry/domain context from document content."""
+    
+    # Define industry indicators with weighted scoring
+    industry_indicators = {
+        "software_development": [
+            ("code", 3), ("software", 3), ("development", 2), ("programming", 3), 
+            ("git", 3), ("repository", 2), ("deployment", 2), ("api", 2),
+            ("testing", 1), ("debug", 2), ("version control", 3), ("agile", 2),
+            ("sprint", 2), ("pull request", 3), ("merge", 2), ("branch", 2),
+            ("ci/cd", 3), ("docker", 3), ("kubernetes", 3), ("devops", 3)
+        ],
+        "manufacturing": [
+            ("manufacturing", 3), ("production", 2), ("assembly", 3), ("machine", 2),
+            ("quality control", 2), ("defect", 2), ("batch", 2), ("line", 1),
+            ("operator", 2), ("tooling", 2), ("cnc", 3), ("fabrication", 3),
+            ("welding", 3), ("molding", 3), ("casting", 3), ("machining", 3),
+            ("inventory", 1), ("warehouse", 2), ("shipping", 1)
+        ],
+        "laboratory": [
+            ("laboratory", 3), ("lab", 2), ("sample", 2), ("test", 1), ("analysis", 2),
+            ("chemical", 2), ("reagent", 3), ("pipette", 3), ("centrifuge", 3),
+            ("microscope", 3), ("specimen", 3), ("culture", 2), ("assay", 3),
+            ("titration", 3), ("chromatography", 3), ("spectroscopy", 3),
+            ("incubation", 3), ("sterilization", 2), ("contamination", 2)
+        ],
+        "healthcare": [
+            ("patient", 3), ("medical", 3), ("clinical", 3), ("diagnosis", 3),
+            ("treatment", 2), ("medication", 3), ("dosage", 3), ("physician", 3),
+            ("nurse", 3), ("hospital", 2), ("clinic", 2), ("surgery", 3),
+            ("infection control", 3), ("hipaa", 3), ("vital signs", 3),
+            ("prescription", 3), ("therapy", 2), ("examination", 2)
+        ],
+        "food_service": [
+            ("food", 2), ("kitchen", 3), ("cooking", 3), ("preparation", 1),
+            ("sanitation", 3), ("hygiene", 3), ("temperature", 1), ("storage", 1),
+            ("allergen", 3), ("cross-contamination", 3), ("haccp", 3),
+            ("food safety", 3), ("serving", 2), ("menu", 2), ("recipe", 2)
+        ],
+        "it_operations": [
+            ("server", 2), ("network", 2), ("database", 2), ("backup", 2),
+            ("security", 1), ("firewall", 3), ("monitoring", 1), ("incident", 1),
+            ("ticket", 2), ("infrastructure", 2), ("cloud", 2), ("aws", 3),
+            ("azure", 3), ("linux", 3), ("windows server", 3), ("active directory", 3),
+            ("vpn", 3), ("dns", 3), ("dhcp", 3)
+        ],
+        "construction": [
+            ("construction", 3), ("building", 1), ("site", 1), ("contractor", 3),
+            ("excavation", 3), ("concrete", 3), ("foundation", 2), ("framing", 3),
+            ("scaffold", 3), ("crane", 3), ("blueprint", 3), ("permit", 2),
+            ("inspection", 1), ("structural", 2), ("electrical", 1), ("plumbing", 2)
+        ],
+        "retail": [
+            ("customer", 2), ("sales", 2), ("cashier", 3), ("register", 2),
+            ("merchandise", 3), ("inventory", 1), ("stock", 1), ("display", 2),
+            ("return", 1), ("refund", 2), ("pos", 3), ("transaction", 2),
+            ("pricing", 2), ("promotion", 2), ("store", 1)
+        ],
+    }
+    
+    # Calculate scores for each industry
+    industry_scores = {}
+    for industry, indicators in industry_indicators.items():
+        score = 0
+        for keyword, weight in indicators:
+            count = content_lower.count(keyword)
+            score += count * weight
+        industry_scores[industry] = score
+    
+    # Get the industry with highest score
+    max_score = max(industry_scores.values())
+    if max_score == 0:
+        return "general_workplace"
+    
+    detected_industry = max(industry_scores, key=industry_scores.get)
+    
+    # Require minimum threshold
+    if max_score < 5:
+        return "general_workplace"
+    
+    return detected_industry
+
+
+def _get_industry_specific_guidance(industry: str) -> str:
+    """Get industry-specific guidance for summary generation."""
+    guidance = {
+        "software_development": """
+This is a software development procedure. Focus on:
+- Code quality, testing, and deployment processes
+- Version control and collaboration workflows
+- Security considerations and best practices
+- Development environment setup and configuration
+- CI/CD pipeline and automation
+- Documentation and code review standards""",
+        
+        "manufacturing": """
+This is a manufacturing procedure. Focus on:
+- Production line operations and workflow
+- Quality control checkpoints and tolerances
+- Equipment operation and maintenance
+- Safety protocols for machinery and materials
+- Inventory management and material handling
+- Defect prevention and corrective actions""",
+        
+        "laboratory": """
+This is a laboratory procedure. Focus on:
+- Sample handling and preparation techniques
+- Equipment calibration and operation
+- Chemical safety and hazard management
+- Contamination prevention and sterile technique
+- Data recording and result interpretation
+- Waste disposal and environmental controls""",
+        
+        "healthcare": """
+This is a healthcare procedure. Focus on:
+- Patient safety and care protocols
+- Infection control and hygiene standards
+- Medical equipment usage and sterilization
+- Documentation and HIPAA compliance
+- Emergency response procedures
+- Medication administration and dosing""",
+        
+        "food_service": """
+This is a food service procedure. Focus on:
+- Food safety and sanitation standards
+- Temperature control and monitoring
+- Cross-contamination prevention
+- Allergen management and labeling
+- HACCP principles and critical control points
+- Personal hygiene and handwashing protocols""",
+        
+        "it_operations": """
+This is an IT operations procedure. Focus on:
+- System reliability and uptime requirements
+- Security protocols and access controls
+- Backup and disaster recovery procedures
+- Incident response and troubleshooting
+- Change management and documentation
+- Monitoring and alerting configurations""",
+        
+        "construction": """
+This is a construction procedure. Focus on:
+- Site safety and hazard identification
+- Equipment operation and inspection
+- Building codes and permit requirements
+- Material handling and storage
+- Fall protection and PPE requirements
+- Quality inspections and documentation""",
+        
+        "retail": """
+This is a retail procedure. Focus on:
+- Customer service standards and protocols
+- Point-of-sale operations and transactions
+- Inventory management and stock control
+- Loss prevention and security measures
+- Return and refund policies
+- Store opening and closing procedures""",
+        
+        "general_workplace": """
+This is a general workplace procedure. Focus on:
+- Clear step-by-step instructions
+- Safety requirements and precautions
+- Quality standards and verification
+- Compliance with regulations
+- Equipment and resource requirements
+- Documentation and record-keeping"""
+    }
+    
+    return guidance.get(industry, guidance["general_workplace"])
+
+
+def _get_industry_focus(industry: str) -> str:
+    """Get the main focus area for each industry."""
+    focus = {
+        "software_development": "code quality, deployment processes, and development best practices",
+        "manufacturing": "production efficiency, quality control, and equipment safety",
+        "laboratory": "sample integrity, analytical accuracy, and contamination prevention",
+        "healthcare": "patient safety, infection control, and clinical protocols",
+        "food_service": "food safety, sanitation, and allergen management",
+        "it_operations": "system reliability, security, and incident response",
+        "construction": "site safety, building codes, and quality standards",
+        "retail": "customer service, transaction accuracy, and loss prevention",
+        "general_workplace": "safety, quality, and compliance"
+    }
+    return focus.get(industry, focus["general_workplace"])
+
+
+def _get_safety_focus(industry: str) -> str:
+    """Get safety focus for each industry."""
+    safety = {
+        "software_development": "data security, access controls, and secure coding practices",
+        "manufacturing": "machine guarding, lockout/tagout, and material handling safety",
+        "laboratory": "chemical hazards, biological safety, and contamination control",
+        "healthcare": "infection control, patient safety, and medical waste disposal",
+        "food_service": "food safety, cross-contamination, and allergen controls",
+        "it_operations": "cybersecurity, data protection, and system access controls",
+        "construction": "fall protection, equipment safety, and site hazards",
+        "retail": "workplace violence prevention, robbery response, and customer safety",
+        "general_workplace": "general workplace safety and hazard prevention"
+    }
+    return safety.get(industry, safety["general_workplace"])
+
+
+def _get_compliance_examples(industry: str) -> str:
+    """Get compliance examples for each industry."""
+    compliance = {
+        "software_development": "ISO 27001, SOC 2, GDPR, PCI DSS",
+        "manufacturing": "ISO 9001, OSHA, EPA, industry-specific standards",
+        "laboratory": "ISO 17025, CLIA, GLP, safety data sheets",
+        "healthcare": "HIPAA, Joint Commission, CDC guidelines, state regulations",
+        "food_service": "FDA Food Code, HACCP, local health department",
+        "it_operations": "ISO 27001, NIST, SOC 2, GDPR, HIPAA",
+        "construction": "OSHA, building codes, ADA, environmental regulations",
+        "retail": "PCI DSS, ADA, OSHA, consumer protection laws",
+        "general_workplace": "OSHA, EPA, industry standards"
+    }
+    return compliance.get(industry, compliance["general_workplace"])
+
+
+def _get_training_guidance(industry: str) -> str:
+    """Get training-specific guidance for each industry."""
+    guidance = {
+        "software_development": """
+Create training that emphasizes:
+- Hands-on coding exercises and practical examples
+- Code review and collaboration workflows
+- Testing methodologies and debugging techniques
+- Security best practices and common vulnerabilities
+- Tool usage and development environment setup
+- Real-world scenarios and edge cases""",
+        
+        "manufacturing": """
+Create training that emphasizes:
+- Hands-on equipment operation and practice
+- Quality inspection techniques and measurements
+- Safety procedures and emergency response
+- Troubleshooting common production issues
+- Standard work and continuous improvement
+- Visual aids and step-by-step demonstrations""",
+        
+        "laboratory": """
+Create training that emphasizes:
+- Proper technique demonstration and practice
+- Equipment operation and calibration
+- Safety protocols and emergency procedures
+- Quality control and result validation
+- Documentation and record-keeping
+- Contamination prevention and sterile technique""",
+        
+        "healthcare": """
+Create training that emphasizes:
+- Patient-centered care and communication
+- Infection control and hand hygiene
+- Proper use of medical equipment
+- Documentation and compliance requirements
+- Emergency response and critical thinking
+- Ethical considerations and patient privacy""",
+        
+        "food_service": """
+Create training that emphasizes:
+- Food safety and sanitation practices
+- Proper food handling techniques
+- Temperature monitoring and control
+- Cross-contamination prevention
+- Allergen awareness and management
+- Personal hygiene and handwashing""",
+        
+        "it_operations": """
+Create training that emphasizes:
+- System architecture and dependencies
+- Troubleshooting methodologies
+- Security protocols and access management
+- Incident response procedures
+- Documentation and change management
+- Monitoring and alerting systems""",
+        
+        "construction": """
+Create training that emphasizes:
+- Hazard recognition and prevention
+- Proper use of tools and equipment
+- Fall protection and PPE requirements
+- Blueprint reading and specifications
+- Quality standards and inspections
+- Emergency response and first aid""",
+        
+        "retail": """
+Create training that emphasizes:
+- Customer service skills and scenarios
+- POS system operation and transactions
+- Product knowledge and merchandising
+- Loss prevention and security awareness
+- Conflict resolution and de-escalation
+- Store policies and procedures""",
+        
+        "general_workplace": """
+Create training that emphasizes:
+- Clear procedural steps and demonstrations
+- Safety awareness and hazard recognition
+- Quality standards and verification
+- Practical application and practice
+- Common issues and troubleshooting
+- Documentation and compliance"""
+    }
+    return guidance.get(industry, guidance["general_workplace"])
+
+
+def _get_role_examples(industry: str) -> str:
+    """Get role-specific examples for training."""
+    examples = {
+        "software_development": """
+- For junior developers: Focus on coding standards, testing basics, and tool usage
+- For senior developers: Emphasize architecture decisions, code review, and mentoring
+- For DevOps engineers: Focus on deployment pipelines, monitoring, and infrastructure
+- Include practical coding examples and common pitfalls""",
+        
+        "manufacturing": """
+- For machine operators: Focus on equipment operation, safety, and quality checks
+- For quality inspectors: Emphasize measurement techniques and defect identification
+- For supervisors: Focus on line management, troubleshooting, and continuous improvement
+- Include visual aids and hands-on practice opportunities""",
+        
+        "laboratory": """
+- For lab technicians: Focus on technique, equipment operation, and safety
+- For analysts: Emphasize data interpretation, quality control, and troubleshooting
+- For supervisors: Focus on compliance, training, and quality assurance
+- Include demonstration videos and practice exercises""",
+        
+        "healthcare": """
+- For nurses: Focus on patient care, medication administration, and documentation
+- For physicians: Emphasize clinical decision-making and protocols
+- For support staff: Focus on patient interaction, safety, and assistance
+- Include patient scenarios and critical thinking exercises""",
+        
+        "food_service": """
+- For line cooks: Focus on food preparation, safety, and quality
+- For servers: Emphasize customer service, allergen awareness, and order accuracy
+- For managers: Focus on food safety compliance, training, and operations
+- Include practical demonstrations and sanitation checks""",
+        
+        "it_operations": """
+- For system administrators: Focus on server management, security, and troubleshooting
+- For network engineers: Emphasize network configuration, monitoring, and security
+- For support staff: Focus on incident response, documentation, and escalation
+- Include real-world scenarios and hands-on labs""",
+        
+        "construction": """
+- For laborers: Focus on safety, tool usage, and basic techniques
+- For skilled trades: Emphasize craft-specific skills and quality standards
+- For supervisors: Focus on site management, safety compliance, and coordination
+- Include safety demonstrations and equipment operation""",
+        
+        "retail": """
+- For sales associates: Focus on customer service, product knowledge, and transactions
+- For cashiers: Emphasize POS operation, accuracy, and loss prevention
+- For managers: Focus on operations, team leadership, and problem resolution
+- Include customer interaction scenarios and role-playing""",
+        
+        "general_workplace": """
+- For new employees: Focus on basic procedures, safety, and expectations
+- For experienced staff: Emphasize efficiency, quality, and best practices
+- For supervisors: Focus on oversight, training, and compliance
+- Include practical examples and common scenarios"""
+    }
+    return examples.get(industry, examples["general_workplace"])
+
+
+def _get_evaluation_guidance(industry: str) -> str:
+    """Get evaluation-specific guidance for each industry."""
+    guidance = {
+        "software_development": """
+Create assessments that test:
+- Understanding of code quality and best practices
+- Knowledge of security vulnerabilities and mitigations
+- Ability to troubleshoot and debug issues
+- Understanding of deployment and CI/CD processes
+- Knowledge of version control workflows
+- Practical problem-solving skills""",
+        
+        "manufacturing": """
+Create assessments that test:
+- Equipment operation knowledge and safety
+- Quality control procedures and tolerances
+- Troubleshooting common production issues
+- Understanding of safety protocols
+- Knowledge of standard work procedures
+- Ability to identify and prevent defects""",
+        
+        "laboratory": """
+Create assessments that test:
+- Proper technique and methodology
+- Equipment operation and calibration
+- Safety protocols and emergency response
+- Quality control and result interpretation
+- Contamination prevention measures
+- Documentation and compliance requirements""",
+        
+        "healthcare": """
+Create assessments that test:
+- Patient safety and care protocols
+- Infection control procedures
+- Medical equipment usage
+- Emergency response procedures
+- Documentation and HIPAA compliance
+- Clinical decision-making skills""",
+        
+        "food_service": """
+Create assessments that test:
+- Food safety and sanitation knowledge
+- Temperature control requirements
+- Cross-contamination prevention
+- Allergen management procedures
+- Personal hygiene standards
+- HACCP critical control points""",
+        
+        "it_operations": """
+Create assessments that test:
+- System architecture understanding
+- Security protocols and access controls
+- Incident response procedures
+- Troubleshooting methodologies
+- Backup and recovery processes
+- Change management procedures""",
+        
+        "construction": """
+Create assessments that test:
+- Safety hazard identification
+- Equipment operation and inspection
+- Building code requirements
+- Fall protection procedures
+- PPE selection and usage
+- Emergency response protocols""",
+        
+        "retail": """
+Create assessments that test:
+- Customer service standards
+- POS operation and transactions
+- Loss prevention procedures
+- Return and refund policies
+- Product knowledge
+- Conflict resolution skills""",
+        
+        "general_workplace": """
+Create assessments that test:
+- Procedural knowledge and understanding
+- Safety awareness and protocols
+- Quality standards and verification
+- Compliance requirements
+- Problem-solving abilities
+- Documentation procedures"""
+    }
+    return guidance.get(industry, guidance["general_workplace"])
+
+
+def _get_scenario_examples(industry: str) -> str:
+    """Get scenario examples for evaluation questions."""
+    scenarios = {
+        "software_development": """
+Example scenarios to test:
+- A production deployment fails - what steps should be taken?
+- A security vulnerability is discovered - how should it be handled?
+- Code review reveals issues - what is the proper response?
+- A critical bug is reported - what is the escalation process?
+- Merge conflicts occur - how should they be resolved?""",
+        
+        "manufacturing": """
+Example scenarios to test:
+- A machine produces out-of-spec parts - what actions are required?
+- Equipment malfunctions during production - what is the response?
+- Quality inspection reveals defects - what is the procedure?
+- Safety hazard is identified - what immediate steps are needed?
+- Material shortage occurs - how should it be handled?""",
+        
+        "laboratory": """
+Example scenarios to test:
+- Sample contamination is suspected - what actions are required?
+- Equipment calibration is out of range - what is the procedure?
+- Unexpected test results occur - how should they be investigated?
+- Chemical spill occurs - what is the emergency response?
+- Quality control fails - what corrective actions are needed?""",
+        
+        "healthcare": """
+Example scenarios to test:
+- Patient shows adverse reaction - what is the immediate response?
+- Infection control breach occurs - what actions are required?
+- Medical equipment malfunctions - what is the procedure?
+- Patient privacy concern arises - how should it be handled?
+- Emergency situation develops - what is the response protocol?""",
+        
+        "food_service": """
+Example scenarios to test:
+- Food temperature is out of safe range - what actions are required?
+- Customer reports allergen concern - how should it be handled?
+- Cross-contamination is suspected - what is the procedure?
+- Equipment breaks during service - what is the response?
+- Food safety violation is observed - what steps are needed?""",
+        
+        "it_operations": """
+Example scenarios to test:
+- Critical system outage occurs - what is the response procedure?
+- Security breach is detected - what immediate actions are required?
+- Backup fails to complete - how should it be investigated?
+- Performance degradation is reported - what troubleshooting steps?
+- Unauthorized access attempt - what is the security response?""",
+        
+        "construction": """
+Example scenarios to test:
+- Fall hazard is identified - what immediate actions are required?
+- Equipment inspection reveals defect - what is the procedure?
+- Weather conditions become unsafe - what is the response?
+- Injury occurs on site - what emergency steps are needed?
+- Code violation is discovered - how should it be addressed?""",
+        
+        "retail": """
+Example scenarios to test:
+- Angry customer demands refund - how should it be handled?
+- Suspected shoplifting occurs - what is the proper response?
+- POS system malfunctions - what backup procedures exist?
+- Product recall is announced - what actions are required?
+- Cash drawer discrepancy found - what is the procedure?""",
+        
+        "general_workplace": """
+Example scenarios to test:
+- Safety hazard is identified - what actions are required?
+- Equipment malfunctions - what is the response procedure?
+- Quality issue is discovered - how should it be handled?
+- Emergency situation occurs - what steps should be taken?
+- Procedure deviation happens - what corrective actions are needed?"""
+    }
+    return scenarios.get(industry, scenarios["general_workplace"])
 
 
 # ---------------------------------------------------------------------------

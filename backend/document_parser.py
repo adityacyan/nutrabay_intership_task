@@ -77,13 +77,51 @@ class DocumentParser:
 
     def _parse_pdf(self, data: bytes) -> tuple[str, dict]:
         pages: list[str] = []
+        total_images = 0
+        total_tables = 0
+        
         with fitz.open(stream=data, filetype="pdf") as doc:
             page_count = len(doc)
-            for page in doc:
-                text = page.get_text() or ""
-                pages.append(text)
-        full_text = "\n".join(pages)
-        return full_text, {"page_count": page_count}
+            for page_num, page in enumerate(doc):
+                # Extract text with layout preservation
+                # Use "blocks" mode to preserve structure better
+                text_blocks = page.get_text("blocks")
+                
+                page_text_parts = []
+                for block in text_blocks:
+                    # block format: (x0, y0, x1, y1, "text", block_no, block_type)
+                    if len(block) >= 5:
+                        block_text = block[4]
+                        if isinstance(block_text, str) and block_text.strip():
+                            page_text_parts.append(block_text.strip())
+                
+                # Join blocks with newlines to preserve structure
+                page_text = "\n".join(page_text_parts)
+                
+                # Also try to extract text with better formatting
+                if not page_text.strip():
+                    # Fallback to standard text extraction
+                    page_text = page.get_text() or ""
+                
+                # Count images and tables for metadata
+                images = page.get_images()
+                total_images += len(images)
+                
+                # Try to detect tables (simple heuristic: look for grid-like structures)
+                if "│" in page_text or "├" in page_text or "┼" in page_text:
+                    total_tables += 1
+                
+                pages.append(page_text)
+        
+        full_text = "\n\n".join(pages)  # Double newline between pages for better separation
+        
+        metadata = {
+            "page_count": page_count,
+            "image_count": total_images,
+            "table_count": total_tables,
+        }
+        
+        return full_text, metadata
 
     def _parse_text(self, data: bytes) -> tuple[str, dict]:
         detected = chardet.detect(data)

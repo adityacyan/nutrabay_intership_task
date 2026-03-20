@@ -1,12 +1,19 @@
 import { AIProcessor } from './AIProcessor';
+import { FileStorageService } from './FileStorageService';
 
 /**
  * ContentGenerator class for orchestrating the creation of all training materials
  * from processed SOP documents
  */
 export class ContentGenerator {
-    constructor() {
-        this.aiProcessor = new AIProcessor();
+    /**
+     * @param {Object} [options] - Optional dependency injection for testing
+     * @param {Object} [options.aiProcessor] - AIProcessor instance (injected for testing)
+     * @param {Object} [options.storageService] - FileStorageService instance (injected for testing)
+     */
+    constructor(options = {}) {
+        this.aiProcessor = options.aiProcessor || new AIProcessor();
+        this.storageService = options.storageService || new FileStorageService();
     }
 
     /**
@@ -45,6 +52,22 @@ export class ContentGenerator {
             console.error('Error generating content:', error);
             throw new Error(`Content generation failed: ${error.message}`);
         }
+    }
+
+    /**
+     * Generate all training content and automatically store it in an organized folder structure.
+     * Satisfies Requirements 6.3 and 6.4.
+     *
+     * @param {Object} parsedDocument - The parsed document object
+     * @returns {Promise<Object>} { generatedContent, folderStructure, storageRecords }
+     */
+    async generateAndStore(parsedDocument) {
+        const generatedContent = await this.generateAllContent(parsedDocument);
+        const { folderStructure, records: storageRecords } = this.storageService.storeAllContent(
+            parsedDocument.filename,
+            generatedContent
+        );
+        return { generatedContent, folderStructure, storageRecords };
     }
 
     /**

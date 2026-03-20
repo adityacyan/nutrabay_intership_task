@@ -144,6 +144,7 @@ class ProcessResponse(BaseModel):
     success: bool
     parsed_document: Optional[ParsedDocument] = None
     generated_content: Optional[GeneratedContent] = None
+    project_id: Optional[str] = None
     error: Optional[str] = None
 
 

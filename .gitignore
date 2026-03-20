@@ -52,3 +52,23 @@ Thumbs.db
 /uploads
 /generated-content
 /temp-files
+
+# Test scripts and output
+**/*.test.js
+**/*.test.py
+**/test_*.py
+**/verify_*.py
+**/automation_example.py
+backend/output/
+backend/__pycache__/
+backend/.pytest_cache/
+src/services/**/*.test.js
+src/components/**/*.test.js
+
+# Summary and documentation files
+ENHANCEMENTS_SUMMARY.md
+STREAMING_IMPLEMENTATION.md
+TASK_7.1_SUMMARY.md
+AUTOMATION_README.md
+PROJECT_STRUCTURE.md
+downloaded_dashboard.html

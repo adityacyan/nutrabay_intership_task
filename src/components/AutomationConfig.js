@@ -1,180 +1,427 @@
 import React, { useState, useEffect } from 'react';
-import { checkHealth } from '../services/apiService';
-
-
-const STORAGE_KEY = 'sop_automation_config';
-
-const DEFAULT_CONFIG = {
-    enabled: false,
-    watchFolder: '',
-    outputFolder: '',
-    pollingIntervalMinutes: 5,
-    autoProcess: true,
-    createOutputFolders: true,
-    emailNotifications: false,
-    emailAddress: '',
-};
+import {
+    checkHealth,
+    configureWatcher,
+    stopWatcher,
+    listWatchers,
+    addGoogleDriveFolder,
+    removeGoogleDriveFolder,
+    getGoogleDriveStatus,
+    startAutomationWorker,
+    stopAutomationWorker
+} from '../services/apiService';
+import './AutomationConfig.css';
 
 const AutomationConfig = () => {
-    const [config, setConfig] = useState(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG;
-        } catch { return DEFAULT_CONFIG; }
-    });
-    const [saved, setSaved] = useState(false);
-    const [backendStatus, setBackendStatus] = useState(null); // null | 'ok' | 'error'
+    // Backend status
+    const [backendStatus, setBackendStatus] = useState(null);
     const [geminiStatus, setGeminiStatus] = useState(false);
 
+    // Local folder monitoring
+    const [localFolderPath, setLocalFolderPath] = useState('');
+    const [recursive, setRecursive] = useState(false);
+    const [activeWatchers, setActiveWatchers] = useState([]);
+    const [localError, setLocalError] = useState('');
+    const [localSuccess, setLocalSuccess] = useState('');
+
+    // Google Drive monitoring
+    const [gdriveFolderId, setGdriveFolderId] = useState('');
+    const [gdriveFolderName, setGdriveFolderName] = useState('');
+    const [gdriveStatus, setGdriveStatus] = useState(null);
+    const [gdriveError, setGdriveError] = useState('');
+    const [gdriveSuccess, setGdriveSuccess] = useState('');
+
+    // Worker status
+    const [workerRunning, setWorkerRunning] = useState(false);
+    const [workerError, setWorkerError] = useState('');
+
+    // Loading states
+    const [loading, setLoading] = useState(false);
+
+    // Check backend health on mount
     useEffect(() => {
         checkHealth()
-            .then(h => { setBackendStatus('ok'); setGeminiStatus(h.gemini_configured); })
+            .then(h => {
+                setBackendStatus('ok');
+                setGeminiStatus(h.gemini_configured);
+            })
             .catch(() => setBackendStatus('error'));
     }, []);
 
-    const update = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
+    // Load active watchers and Google Drive status
+    useEffect(() => {
+        if (backendStatus === 'ok') {
+            loadActiveWatchers();
+            loadGoogleDriveStatus();
+        }
+    }, [backendStatus]);
 
-    const handleSave = () => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2500);
+    const loadActiveWatchers = async () => {
+        try {
+            const result = await listWatchers();
+            setActiveWatchers(result.watchers || []);
+        } catch (err) {
+            console.error('Failed to load watchers:', err);
+        }
     };
 
-    const handleReset = () => {
-        setConfig(DEFAULT_CONFIG);
-        localStorage.removeItem(STORAGE_KEY);
+    const loadGoogleDriveStatus = async () => {
+        try {
+            const status = await getGoogleDriveStatus();
+            setGdriveStatus(status);
+        } catch (err) {
+            console.error('Failed to load Google Drive status:', err);
+        }
     };
+
+    // Local folder monitoring handlers
+    const handleAddLocalFolder = async () => {
+        if (!localFolderPath.trim()) {
+            setLocalError('Please enter a folder path');
+            return;
+        }
+
+        setLoading(true);
+        setLocalError('');
+        setLocalSuccess('');
+
+        try {
+            await configureWatcher(localFolderPath, { recursive });
+            setLocalSuccess(`Started monitoring: ${localFolderPath}`);
+            setLocalFolderPath('');
+            await loadActiveWatchers();
+        } catch (err) {
+            setLocalError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleStopWatcher = async (watchId) => {
+        setLoading(true);
+        setLocalError('');
+
+        try {
+            await stopWatcher(watchId);
+            setLocalSuccess(`Stopped monitoring: ${watchId}`);
+            await loadActiveWatchers();
+        } catch (err) {
+            setLocalError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Google Drive handlers
+    const handleAddGoogleDrive = async () => {
+        if (!gdriveFolderId.trim()) {
+            setGdriveError('Please enter a Google Drive folder ID');
+            return;
+        }
+
+        setLoading(true);
+        setGdriveError('');
+        setGdriveSuccess('');
+
+        try {
+            await addGoogleDriveFolder(gdriveFolderId, {
+                folderName: gdriveFolderName || undefined
+            });
+            setGdriveSuccess(`Added Google Drive folder: ${gdriveFolderName || gdriveFolderId}`);
+            setGdriveFolderId('');
+            setGdriveFolderName('');
+            await loadGoogleDriveStatus();
+        } catch (err) {
+            setGdriveError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRemoveGoogleDrive = async (folderId) => {
+        setLoading(true);
+        setGdriveError('');
+
+        try {
+            await removeGoogleDriveFolder(folderId);
+            setGdriveSuccess(`Removed Google Drive folder: ${folderId}`);
+            await loadGoogleDriveStatus();
+        } catch (err) {
+            setGdriveError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Worker handlers
+    const handleStartWorker = async () => {
+        setLoading(true);
+        setWorkerError('');
+
+        try {
+            await startAutomationWorker();
+            setWorkerRunning(true);
+        } catch (err) {
+            setWorkerError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleStopWorker = async () => {
+        setLoading(true);
+        setWorkerError('');
+
+        try {
+            await stopAutomationWorker();
+            setWorkerRunning(false);
+        } catch (err) {
+            setWorkerError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (backendStatus === null) {
+        return (
+            <div className="automation-config">
+                <div className="ac-loading">Checking backend status...</div>
+            </div>
+        );
+    }
+
+    if (backendStatus === 'error') {
+        return (
+            <div className="automation-config">
+                <div className="ac-error-banner">
+                    <span className="material-symbols-outlined">error</span>
+                    <div>
+                        <strong>Backend Offline</strong>
+                        <p>Start the backend server to configure automation</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="automation-config">
-            {/* Status bar */}
+            {/* Status Bar */}
             <div className="ac-status-bar">
-                <div className={`ac-status-dot ac-status-dot--${backendStatus === 'ok' ? 'ok' : backendStatus === 'error' ? 'err' : 'checking'}`} />
+                <div className="ac-status-dot ac-status-dot--ok" />
                 <span>
-                    {backendStatus === null && 'Checking backend…'}
-                    {backendStatus === 'ok' && `Backend online ${geminiStatus ? '· Gemini AI connected' : '· Gemini not configured'}`}
-                    {backendStatus === 'error' && 'Backend offline — start uvicorn to enable automation'}
+                    Backend online · {geminiStatus ? 'Gemini AI connected' : 'Gemini not configured'}
                 </span>
             </div>
 
-            <div className="ac-note">
-                <strong>ℹ️ About Automation</strong>
-                <p>File watching (chokidar) runs on the server side. The settings you configure here are saved to your browser and sent to the backend when it supports the automation endpoint. For now, configure your preferences and test processing via the Processor page.</p>
-            </div>
-
-            {/* Main toggle */}
+            {/* Worker Control */}
             <div className="ac-section">
-                <div className="ac-row ac-row--main">
-                    <div>
-                        <h4>Enable Automation</h4>
-                        <p>Automatically process new SOP documents added to the watch folder</p>
-                    </div>
-                    <label className="ac-toggle">
-                        <input type="checkbox" checked={config.enabled} onChange={e => update('enabled', e.target.checked)} />
-                        <span className="ac-toggle-slider" />
-                    </label>
-                </div>
-            </div>
+                <h3 className="ac-section-title">⚙️ Automation Worker</h3>
+                <p className="ac-section-desc">
+                    The automation worker processes documents detected by folder monitors
+                </p>
 
-            {/* Folder settings */}
-            <div className={`ac-section ${!config.enabled ? 'ac-section--disabled' : ''}`}>
-                <h4 className="ac-section-title">📁 Folder Configuration</h4>
-                <div className="ac-field">
-                    <label>Watch Folder Path</label>
-                    <input
-                        type="text"
-                        placeholder="e.g. C:\SOPs\Incoming"
-                        value={config.watchFolder}
-                        onChange={e => update('watchFolder', e.target.value)}
-                        disabled={!config.enabled}
-                    />
-                    <small>New SOP files placed here will be automatically processed</small>
-                </div>
-                <div className="ac-field">
-                    <label>Output Folder Path</label>
-                    <input
-                        type="text"
-                        placeholder="e.g. C:\SOPs\Generated"
-                        value={config.outputFolder}
-                        onChange={e => update('outputFolder', e.target.value)}
-                        disabled={!config.enabled}
-                    />
-                    <small>Generated training materials will be saved here</small>
-                </div>
-                <div className="ac-field">
-                    <label>Polling Interval (minutes)</label>
-                    <select
-                        value={config.pollingIntervalMinutes}
-                        onChange={e => update('pollingIntervalMinutes', Number(e.target.value))}
-                        disabled={!config.enabled}
+                <div className="ac-worker-status">
+                    <div className="ac-worker-info">
+                        <div className={`ac-worker-indicator ${workerRunning ? 'active' : ''}`} />
+                        <span>{workerRunning ? 'Worker Running' : 'Worker Stopped'}</span>
+                    </div>
+                    <button
+                        className={`ac-btn ${workerRunning ? 'ac-btn--danger' : 'ac-btn--primary'}`}
+                        onClick={workerRunning ? handleStopWorker : handleStartWorker}
+                        disabled={loading}
                     >
-                        {[1, 2, 5, 10, 15, 30, 60].map(v => (
-                            <option key={v} value={v}>{v} {v === 1 ? 'minute' : 'minutes'}</option>
-                        ))}
-                    </select>
+                        {workerRunning ? 'Stop Worker' : 'Start Worker'}
+                    </button>
                 </div>
+
+                {workerError && (
+                    <div className="ac-error">{workerError}</div>
+                )}
             </div>
 
-            {/* Processing options */}
-            <div className={`ac-section ${!config.enabled ? 'ac-section--disabled' : ''}`}>
-                <h4 className="ac-section-title">⚙️ Processing Options</h4>
-                <div className="ac-toggle-row">
-                    <div>
-                        <span>Auto-process on file detection</span>
-                        <small>Start processing immediately when a new file appears</small>
-                    </div>
-                    <label className="ac-toggle">
-                        <input type="checkbox" checked={config.autoProcess} onChange={e => update('autoProcess', e.target.checked)} disabled={!config.enabled} />
-                        <span className="ac-toggle-slider" />
-                    </label>
-                </div>
-                <div className="ac-toggle-row">
-                    <div>
-                        <span>Create output sub-folders</span>
-                        <small>Create a dedicated folder for each processed SOP</small>
-                    </div>
-                    <label className="ac-toggle">
-                        <input type="checkbox" checked={config.createOutputFolders} onChange={e => update('createOutputFolders', e.target.checked)} disabled={!config.enabled} />
-                        <span className="ac-toggle-slider" />
-                    </label>
-                </div>
-            </div>
+            {/* Local Folder Monitoring */}
+            <div className="ac-section">
+                <h3 className="ac-section-title">📁 Local Folder Monitoring</h3>
+                <p className="ac-section-desc">
+                    Monitor local folders for new SOP documents
+                </p>
 
-            {/* Notifications */}
-            <div className={`ac-section ${!config.enabled ? 'ac-section--disabled' : ''}`}>
-                <h4 className="ac-section-title">🔔 Notifications</h4>
-                <div className="ac-toggle-row">
-                    <div>
-                        <span>Email notifications</span>
-                        <small>Send email when processing completes or fails</small>
-                    </div>
-                    <label className="ac-toggle">
-                        <input type="checkbox" checked={config.emailNotifications} onChange={e => update('emailNotifications', e.target.checked)} disabled={!config.enabled} />
-                        <span className="ac-toggle-slider" />
-                    </label>
-                </div>
-                {config.emailNotifications && (
-                    <div className="ac-field" style={{ marginTop: 12 }}>
-                        <label>Notification Email</label>
+                <div className="ac-form">
+                    <div className="ac-field">
+                        <label htmlFor="local-folder-path">Folder Path</label>
                         <input
-                            type="email"
-                            placeholder="you@company.com"
-                            value={config.emailAddress}
-                            onChange={e => update('emailAddress', e.target.value)}
-                            disabled={!config.enabled}
+                            id="local-folder-path"
+                            type="text"
+                            placeholder="e.g., C:\SOPs\Incoming or /home/user/sops"
+                            value={localFolderPath}
+                            onChange={(e) => setLocalFolderPath(e.target.value)}
+                            disabled={loading}
                         />
+                    </div>
+
+                    <div className="ac-checkbox">
+                        <input
+                            type="checkbox"
+                            id="recursive"
+                            checked={recursive}
+                            onChange={(e) => setRecursive(e.target.checked)}
+                            disabled={loading}
+                        />
+                        <label htmlFor="recursive">Monitor subdirectories recursively</label>
+                    </div>
+
+                    <button
+                        className="ac-btn ac-btn--primary"
+                        onClick={handleAddLocalFolder}
+                        disabled={loading || !localFolderPath.trim()}
+                    >
+                        {loading ? 'Adding...' : 'Add Folder'}
+                    </button>
+                </div>
+
+                {localError && (
+                    <div className="ac-error">{localError}</div>
+                )}
+                {localSuccess && (
+                    <div className="ac-success">{localSuccess}</div>
+                )}
+
+                {/* Active Watchers */}
+                {activeWatchers.length > 0 && (
+                    <div className="ac-watchers">
+                        <h4>Active Monitors</h4>
+                        {activeWatchers.map((watcher) => (
+                            <div key={watcher.watch_id} className="ac-watcher-item">
+                                <div className="ac-watcher-info">
+                                    <span className="material-symbols-outlined">folder</span>
+                                    <div>
+                                        <div className="ac-watcher-path">{watcher.watch_id}</div>
+                                        <div className="ac-watcher-status">
+                                            {watcher.is_alive ? (
+                                                <span className="ac-status-badge ac-status-badge--active">Active</span>
+                                            ) : (
+                                                <span className="ac-status-badge ac-status-badge--inactive">Inactive</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    className="ac-btn ac-btn--danger-sm"
+                                    onClick={() => handleStopWatcher(watcher.watch_id)}
+                                    disabled={loading}
+                                >
+                                    Stop
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 )}
             </div>
 
-            {/* Actions */}
-            <div className="ac-actions">
-                <button className="ac-btn ac-btn--primary" onClick={handleSave}>
-                    {saved ? '✓ Saved!' : 'Save Configuration'}
-                </button>
-                <button className="ac-btn ac-btn--secondary" onClick={handleReset}>
-                    Reset to Defaults
-                </button>
+            {/* Google Drive Monitoring */}
+            <div className="ac-section">
+                <h3 className="ac-section-title">☁️ Google Drive Monitoring</h3>
+                <p className="ac-section-desc">
+                    Monitor shared Google Drive folders for new SOP documents
+                </p>
+
+                {gdriveStatus && !gdriveStatus.configured && (
+                    <div className="ac-info-banner">
+                        <span className="material-symbols-outlined">info</span>
+                        <div>
+                            <strong>Google Drive Not Configured</strong>
+                            <p>Set GOOGLE_DRIVE_CREDENTIALS environment variable to enable</p>
+                        </div>
+                    </div>
+                )}
+
+                {gdriveStatus && gdriveStatus.configured && (
+                    <>
+                        <div className="ac-form">
+                            <div className="ac-field">
+                                <label htmlFor="gdrive-folder-id">Folder ID</label>
+                                <input
+                                    id="gdrive-folder-id"
+                                    type="text"
+                                    placeholder="Google Drive folder ID"
+                                    value={gdriveFolderId}
+                                    onChange={(e) => setGdriveFolderId(e.target.value)}
+                                    disabled={loading}
+                                />
+                                <small>Find the folder ID in the Google Drive URL</small>
+                            </div>
+
+                            <div className="ac-field">
+                                <label htmlFor="gdrive-folder-name">Folder Name (optional)</label>
+                                <input
+                                    id="gdrive-folder-name"
+                                    type="text"
+                                    placeholder="Display name for this folder"
+                                    value={gdriveFolderName}
+                                    onChange={(e) => setGdriveFolderName(e.target.value)}
+                                    disabled={loading}
+                                />
+                            </div>
+
+                            <button
+                                className="ac-btn ac-btn--primary"
+                                onClick={handleAddGoogleDrive}
+                                disabled={loading || !gdriveFolderId.trim()}
+                            >
+                                {loading ? 'Adding...' : 'Add Google Drive Folder'}
+                            </button>
+                        </div>
+
+                        {gdriveError && (
+                            <div className="ac-error">{gdriveError}</div>
+                        )}
+                        {gdriveSuccess && (
+                            <div className="ac-success">{gdriveSuccess}</div>
+                        )}
+
+                        {/* Monitored Google Drive Folders */}
+                        {gdriveStatus.monitored_folders && gdriveStatus.monitored_folders.length > 0 && (
+                            <div className="ac-watchers">
+                                <h4>Monitored Folders</h4>
+                                {gdriveStatus.monitored_folders.map((folder) => (
+                                    <div key={folder.folder_id} className="ac-watcher-item">
+                                        <div className="ac-watcher-info">
+                                            <span className="material-symbols-outlined">cloud</span>
+                                            <div>
+                                                <div className="ac-watcher-path">
+                                                    {folder.folder_name || folder.folder_id}
+                                                </div>
+                                                <div className="ac-watcher-meta">
+                                                    ID: {folder.folder_id}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            className="ac-btn ac-btn--danger-sm"
+                                            onClick={() => handleRemoveGoogleDrive(folder.folder_id)}
+                                            disabled={loading}
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+
+            {/* Help Section */}
+            <div className="ac-section ac-section--help">
+                <h3 className="ac-section-title">💡 How It Works</h3>
+                <ul className="ac-help-list">
+                    <li>Start the automation worker to enable background processing</li>
+                    <li>Add local folders or Google Drive folders to monitor</li>
+                    <li>When new .txt or .pdf files are detected, they're automatically processed</li>
+                    <li>Generated training materials are saved to the output folder</li>
+                    <li>View processed documents in the My Projects page</li>
+                </ul>
             </div>
         </div>
     );

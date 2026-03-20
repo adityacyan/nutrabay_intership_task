@@ -8,6 +8,6 @@ export { AIProcessor } from './AIProcessor';
 export { ContentGenerator } from './ContentGenerator';
 
 // Placeholder exports for future services:
-// export { default as OutputFormatter } from './OutputFormatter';
-// export { default as FileStorageService } from './FileStorageService';
+export { OutputFormatter } from './OutputFormatter';
+export { FileStorageService } from './FileStorageService';
 // export { default as AutomationService } from './AutomationService';
