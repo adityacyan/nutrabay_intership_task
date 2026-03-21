@@ -89,15 +89,19 @@ class StorageService:
     def list_projects(self) -> list[dict]:
         """Return metadata for all saved projects, newest first."""
         projects = []
-        for entry in sorted(self.output_dir.iterdir(), reverse=True):
+        for entry in self.output_dir.iterdir():
             if not entry.is_dir():
                 continue
             meta_path = entry / "metadata.json"
             if meta_path.exists():
                 try:
-                    projects.append(json.loads(meta_path.read_text(encoding="utf-8")))
+                    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                    projects.append(metadata)
                 except Exception:
                     pass
+        
+        # Sort by processed_at timestamp, newest first
+        projects.sort(key=lambda p: p.get("processed_at", ""), reverse=True)
         return projects
 
     def get_project(self, project_id: str) -> Optional[dict]:

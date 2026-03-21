@@ -2,6 +2,42 @@
 
 AI-powered system that transforms Standard Operating Procedure documents into comprehensive training materials using Google Gemini AI.
 
+## System Architecture & Process Flow
+
+![Project Workflow Diagram](Project_Workflow_Diagram.png)
+
+The system follows a comprehensive three-tier architecture:
+
+### Frontend (React UI)
+- **User Upload Interface**: Drag & drop document upload (PDF/TXT)
+- **Real-time Dashboard**: Live processing status with SSE streaming
+- **Results Viewer**: Interactive display of generated content (PDF, PPT, UI)
+
+### Backend (FastAPI)
+- **Automation Monitor**: Watches local folders and Google Drive for new documents
+- **Document Parser**: Advanced text extraction using PyMuPDF & PDFPlumber
+- **WebSocket/SSE Controller**: Real-time status streaming to frontend
+- **Output Formatter**: Generates presentations and final PDFs
+
+### External Services / AI / Storage
+- **Google Drive API**: Cloud document monitoring and synchronization
+- **Google Gemini AI**: SOP content generation (Summary, Training, Test)
+- **Project Storage**: File system database for processed documents
+
+## Application Screenshots
+
+### Dashboard - Document Processing Interface
+![Dashboard](homescreen.png)
+*Main ingestion pipeline where users upload documents and see real-time processing status*
+
+### Automation - Folder Monitoring Setup
+![Automation](automationsc.png)
+*Configure automated folder monitoring and processing pipelines for hands-free operation*
+
+### Output Results - Generated Content
+![Output](output.png)
+*View processed results with generated summaries, training materials, and evaluation content*
+
 ## Features
 
 ### Document Processing

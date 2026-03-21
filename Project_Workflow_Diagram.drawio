@@ -1,0 +1,95 @@
+<mxfile host="Electron" modified="2026-03-21T00:00:00.000Z" agent="Mozilla/5.0" version="22.1.2" type="device">
+  <diagram id="WorkflowDiagram" name="Workflow">
+    <mxGraphModel dx="1290" dy="850" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Background/Containers -->
+        <mxCell id="ContainerUI" value="Frontend (React UI)" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="280" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ContainerBackend" value="Backend (FastAPI)" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="360" y="40" width="360" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="ContainerAI" value="External Services / AI / Storage" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="760" y="40" width="280" height="600" as="geometry" />
+        </mxCell>
+        
+        <!-- Nodes in Frontend -->
+        <mxCell id="UserUpload" value="User Uploads Document&#xa;(PDF/TXT)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerUI">
+          <mxGeometry x="60" y="60" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Dashboard" value="Dashboard / Status Display&#xa;(SSE Real-time UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerUI">
+          <mxGeometry x="60" y="320" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ResultsDownload" value="View &amp; Download Results&#xa;(PDF, PPT, UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerUI">
+          <mxGeometry x="60" y="460" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Nodes in Backend -->
+        <mxCell id="AutomationMonitor" value="Automation Monitor&#xa;(Local Folder / Google Drive)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerBackend">
+          <mxGeometry x="100" y="60" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="DocParser" value="Document Parser&#xa;(PyMuPDF &amp; PDFPlumber)&#xa;Text Extraction" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="ContainerBackend">
+          <mxGeometry x="100" y="160" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="StreamingService" value="WebSocket / SSE&#xa;Streaming Status Controller" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerBackend">
+          <mxGeometry x="100" y="320" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Formatter" value="Output Formatter&#xa;(Generates PPT, final PDF)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="ContainerBackend">
+          <mxGeometry x="100" y="460" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Nodes in External -->
+        <mxCell id="GoogleDrive" value="Google Drive API" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerAI">
+          <mxGeometry x="80" y="60" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="GeminiAI" value="Google Gemini AI&#xa;SOP Content Generation&#xa;(Summary, Training, Test)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="ContainerAI">
+          <mxGeometry x="80" y="240" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="LocalStorage" value="Project Storage&#xa;(File System DB)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="ContainerAI">
+          <mxGeometry x="100" y="450" width="100" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Edges -->
+        <mxCell id="Edge1" edge="1" parent="1" source="UserUpload" target="DocParser">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge2" edge="1" parent="1" source="GoogleDrive" target="AutomationMonitor">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge3" edge="1" parent="1" source="AutomationMonitor" target="DocParser">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge4" edge="1" parent="1" source="DocParser" target="GeminiAI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge5" edge="1" parent="1" source="GeminiAI" target="StreamingService">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge6" edge="1" parent="1" source="StreamingService" target="Dashboard">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge7" edge="1" parent="1" source="StreamingService" target="Formatter">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge8" edge="1" parent="1" source="Formatter" target="ResultsDownload">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge9" edge="1" parent="1" source="Formatter" target="LocalStorage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Edge10" edge="1" parent="1" source="LocalStorage" target="ResultsDownload">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="860" y="600" />
+              <mxPoint x="180" y="600" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -22,7 +22,16 @@ export default function MyProjects() {
         setError(null);
         try {
             const data = await listProjects();
-            setProjects(data.projects || []);
+            const projectsList = data.projects || [];
+
+            // Sort projects by processed_at timestamp, newest first
+            const sortedProjects = projectsList.sort((a, b) => {
+                const dateA = new Date(a.processed_at || 0);
+                const dateB = new Date(b.processed_at || 0);
+                return dateB - dateA; // Newest first
+            });
+
+            setProjects(sortedProjects);
         } catch (err) {
             setError('Could not load projects. Make sure the backend is running.');
         } finally {

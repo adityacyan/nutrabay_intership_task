@@ -497,8 +497,19 @@ async def start_automation_worker():
         _notification_queue.append(notification)
         print(f"[NOTIFICATION] Error: {Path(file_path).name}")
     
+    async def on_start(file_path, filename):
+        notification = {
+            'type': 'info',
+            'message': f"Started processing: {filename}",
+            'filename': filename,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        _notification_queue.append(notification)
+        print(f"[NOTIFICATION] Started: {filename}")
+    
     _automation.set_success_callback(on_success)
     _automation.set_error_callback(on_error)
+    _automation.set_start_callback(on_start)
     
     # Start worker in background
     import asyncio

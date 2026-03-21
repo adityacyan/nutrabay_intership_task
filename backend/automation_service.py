@@ -44,6 +44,7 @@ class AutomationService:
         self.is_running = False
         self.error_callback: Optional[Callable] = None
         self.success_callback: Optional[Callable] = None
+        self.start_callback: Optional[Callable] = None
         self.event_loop: Optional[asyncio.AbstractEventLoop] = None
         
     def configure_watcher(
@@ -167,6 +168,10 @@ class AutomationService:
                 file_bytes = f.read()
             
             filename = path.name
+            
+            # Notify processing started
+            if self.start_callback:
+                await self.start_callback(file_path, filename)
             
             # Determine content type
             if filename.lower().endswith('.pdf'):
@@ -316,6 +321,10 @@ class AutomationService:
     def set_success_callback(self, callback: Callable):
         """Set callback function for success notifications."""
         self.success_callback = callback
+    
+    def set_start_callback(self, callback: Callable):
+        """Set callback function for processing start notifications."""
+        self.start_callback = callback
     
     async def start_processing_worker(self):
         """Start background worker for processing queued documents."""
